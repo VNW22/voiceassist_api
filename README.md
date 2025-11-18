@@ -1,42 +1,74 @@
+
+---
+
 # Voicessist API
 
-Voicessist is a real-time speech-to-text (STT) and text-to-speech (TTS) API built to help speech-impaired users communicate clearly. It supports Kenyan English and Swahili and is optimized for non-standard speech patterns. The API is hosted on Modal for fast, scalable cloud access.
+![Modal Hosted](https://img.shields.io/badge/Hosted%20on-Modal-blueviolet)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![ASR](https://img.shields.io/badge/Speech--to--Text-Whisper%20Finetuned-success)
+![Languages](https://img.shields.io/badge/Languages-Kenyan%20English%20%26%20Swahili-yellow)
+![HuggingFace](https://img.shields.io/badge/Models-HuggingFace-orange)
+![WebSocket](https://img.shields.io/badge/API-WebSocket%20Streaming-informational)
+![Purpose](https://img.shields.io/badge/Purpose-Speech%20Impaired%20Accessibility-%23FF69B4)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+![License](https://img.shields.io/github/license/VNW22/voicessist-api)
+![Stars](https://img.shields.io/github/stars/VNW22/voicessist-api?style=social)
 
-## Features
+---
 
-- Real-time STT (speech → text)
-- Real-time TTS (text → speech)
-- Supports Kenyan English + Swahili
-- Optimized for speech-impaired users
-- Hosted on Modal for reliable cloud inference
+Voicessist is a real-time Speech-to-Text (STT) and Text-to-Speech (TTS) API designed for **speech-impaired users**.
+It supports **Kenyan English** and **Swahili**, and is optimized for **non-standard speech patterns**.
+The service is fully hosted on **Modal**, providing low-latency, scalable inference.
 
-## Models
+---
 
-This API uses finetuned Hugging Face Whisper models:
+                
 
-- English: `Veronica1NW/en_whisper_nonstandard_medium`
-- Swahili: `Veronica1NW/sw_whisper_nonstandard_medium`
+## 🚀 Features
 
-> Models are downloaded automatically at runtime via Hugging Face Hub.
+* Real-time **STT** (speech → text)
+* Real-time **TTS** (text → speech)
+* Supports **Kenyan English + Swahili**
+* Optimized for **non-standard and impaired speech**
+* WebSocket-based streaming
+* Hosted on **Modal** for reliable cloud inference
 
-## WebSocket Endpoint
+---
 
+## 🧠 Models Used
+
+* **English Whisper (Finetuned):** `Veronica1NW/en_whisper_nonstandard_medium`
+* **Swahili Whisper (Finetuned):** `Veronica1NW/sw_whisper_nonstandard_medium`
+
+Models are automatically downloaded from Hugging Face at runtime.
+
+---
+
+## 🌐 WebSocket Endpoint (Modal Hosted)
+
+Use this WebSocket URL to connect to the API:
+
+```javascript
+const WS_URL = "wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws";
 ```
-"wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws"
-```
 
-The API communicates over WebSocket for real-time streaming of audio chunks.
+This endpoint handles streaming audio input and returns:
 
-## Sending Audio Chunks
+* live STT transcriptions
+* real-time TTS audio (base64)
 
-To get accurate real-time transcription, send audio in small chunks:
+---
 
-- **Format:** 16-bit PCM WAV or raw audio
-- **Sample rate:** 16 kHz recommended
-- **Chunk length:** ~1–3 seconds (2500–5000 ms)
-- **Encoding:** Base64
+## 🎧 Sending Audio Chunks
 
-**Example payload:**
+To send streaming audio:
+
+* **Encoding:** Base64
+* **Format:** raw audio or PCM WAV
+* **Recommended rate:** 16 kHz
+* **Chunk size:** ~1–3 seconds
+
+### Audio Chunk Payload
 
 ```json
 {
@@ -45,18 +77,18 @@ To get accurate real-time transcription, send audio in small chunks:
 }
 ```
 
-**Optional control messages:**
+### Stream Control Messages
 
 ```json
-{"type": "start_stream"}  // Begin streaming
-{"type": "end_stream"}    // End streaming and force final transcription/TTS
+{"type": "start_stream"}
+{"type": "end_stream"}
 ```
 
-## Receiving Responses
+---
 
-The API sends JSON responses for each chunk.
+## 📥 Receiving Responses
 
-**Transcription:**
+### Transcription Response
 
 ```json
 {
@@ -65,7 +97,7 @@ The API sends JSON responses for each chunk.
 }
 ```
 
-**TTS audio:**
+### TTS Audio Response
 
 ```json
 {
@@ -74,55 +106,60 @@ The API sends JSON responses for each chunk.
 }
 ```
 
-You can play the TTS audio immediately on the client.
+---
 
-## Setup / Installation
+## 📂 Frontend / Backend Compatibility
 
-Even though the API is hosted on Modal, you can run a local test:
+All detailed instructions for:
+
+* formatting audio for the backend
+* converting microphone audio to **16 kHz**
+* streaming PCM data
+* implementing STT + TTS with **FastAPI** and **Uvicorn**
+
+are located in the **`main/` folder** of this repository.
+
+> The `main/` folder provides the full working example of how the STT + TTS pipeline is implemented.
+
+---
+
+## 🔧 Local Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/voicessist-api.git
+git clone https://github.com/VNW22/voicessist-api.git
 cd voicessist-api
 pip install -r requirements.txt
 ```
 
-## Python Usage Example
+---
+
+## 🐍 Python Example Client
 
 ```python
 import asyncio
 import websockets
 import base64
 
-async def send_audio():
-    uri = "wss://<your-modal-endpoint>"
+async def stream():
+    uri = "wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws"
     async with websockets.connect(uri) as ws:
-        # Start streaming
-        await ws.send('{"type":"start_stream"}')
 
-        # Send audio chunk
+        await ws.send('{"type": "start_stream"}')
+
         with open("chunk.wav", "rb") as f:
-            chunk_bytes = f.read()
-        chunk_b64 = base64.b64encode(chunk_bytes).decode("utf-8")
-        await ws.send(f'{{"type":"audio_chunk","audio":"{chunk_b64}"}}')
+            chunk = f.read()
 
-        # Receive transcription
-        response = await ws.recv()
-        print(response)
+        b64 = base64.b64encode(chunk).decode()
+        await ws.send(f'{{"type":"audio_chunk","audio":"{b64}"}}')
 
-        # End streaming
+        print(await ws.recv())
+
         await ws.send('{"type":"end_stream"}')
 
-asyncio.run(send_audio())
+asyncio.run(stream())
 ```
 
-## Notes for Users
-
-- Always send audio in small, consistent chunks.
-- Keep sample rate at 16 kHz for best performance.
-- Base64-encode audio before sending over WebSocket.
-- The API automatically detects and handles English and Swahili speech.
+---
 
 
-
-Clone this repo:https://github.com/VNW22/voicessist-api.git
-cd voicessist-api
+error: Receives operational errors.

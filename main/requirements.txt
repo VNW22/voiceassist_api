@@ -1,0 +1,11 @@
+torch
+transformers
+pydub==0.25.1
+fastapi==0.115.12
+uvicorn
+numpy<2
+librosa
+hf_transfer
+websockets==11.0.3
+webrtcvad
+requests
