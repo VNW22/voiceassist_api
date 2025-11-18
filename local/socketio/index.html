@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Voice Assistant (Socket.IO)</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', Arial, sans-serif;
+      background: #f4f4f9;
+      color: #222;
+      text-align: center;
+      padding: 40px;
+    }
+    h1 { color: #333; margin-bottom: 20px;}
+    div { margin-bottom: 15px; }
+    select, button {
+      margin: 10px;
+      padding: 8px 15px;
+      border-radius: 6px;
+      border: 1px solid #aaa;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover:not(:disabled) { background: #ddd; }
+    #startBtn { background: #4CAF50; color: white; border: none; }
+    #startBtn:disabled { background: #aaa; }
+    #stopBtn { background: #f44336; color: white; border: none; }
+    #transcription {
+      margin-top: 20px;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      min-height: 80px;
+      width: 90%;
+      max-width: 600px;
+      display: inline-block;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      text-align: left;
+      font-size: 1.1em;
+      white-space: pre-wrap;
+    }
+    #status { color: #007bff; font-weight: bold; }
+    #ttsAudio { display: none; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🎙️ Live Voice Assistant (STT & TTS)</h1>
+
+  <div>
+    <label>Language:</label>
+    <select id="lang">
+      <option value="en">English (Kenyan)</option>
+      <option value="sw">Swahili</option>
+    </select>
+
+    <label>Voice:</label>
+    <select id="gender">
+      <option value="male">Male</option>
+      <option value="female">Female</option>
+    </select>
+
+    <label>Output:</label>
+    <select id="output">
+      <option value="text_only">Text only</option>
+      <option value="audio">Audio (TTS)</option>
+    </select>
+  </div>
+
+  <div>
+    <button id="startBtn">🎤 Start Recording</button>
+    <button id="stopBtn" disabled>⏹️ Stop</button>
+  </div>
+
+  <div id="status">Status: Connecting...</div>
+  <div id="transcription">Waiting for transcription...</div>
+  
+  <audio id="ttsAudio" controls autoplay></audio>
+
+  <script>
+    // --- Configuration ---
+    // NOTE: If running remotely, replace io() with io('your_remote_url')
+    const socket = io({
+      transports: ["websocket"],
+      forceNew: true,
+      reconnectionAttempts: 3
+    });
+    
+    // Target sample rate MUST match the backend: 16kHz
+    const TARGET_SAMPLE_RATE = 16000;
+    const CHUNK_SIZE = 4096; // Buffer size for ScriptProcessorNode
+
+    let mediaStream;
+    let audioContext;
+    let processor;
+    let sourceNode;
+    let recording = false;
+
+    // --- DOM Elements ---
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const transcriptionEl = document.getElementById("transcription");
+    const ttsAudio = document.getElementById("ttsAudio");
+    const statusEl = document.getElementById("status");
+
+    let ttsAudioChunks = [];
+
+    // --- Socket Events ---
+    socket.on("connect", () => {
+      statusEl.textContent = "✅ Connected to server";
+      startBtn.disabled = false;
+    });
+
+    socket.on("disconnect", () => {
+      statusEl.textContent = "❌ Disconnected";
+      stopRecording();
+    });
+
+    socket.on("error", err => {
+      console.error("Server error:", err);
+      statusEl.textContent = `🚨 Error: ${err.message || "Unknown error"}`;
+      stopRecording();
+    });
+
+    socket.on("transcription_text", data => {
+      transcriptionEl.textContent = data.text;
+      console.log("Transcribed:", data.text);
+    });
+
+    socket.on("tts_audio_chunk", data => {
+      try {
+        // Decode Base64 string from backend
+        const raw = atob(data.data);
+        const arr = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        ttsAudioChunks.push(arr);
+        console.debug(`Received TTS chunk (${ttsAudioChunks.length})`);
+      } catch (err) {
+        console.error("TTS chunk decode error:", err);
+      }
+    });
+
+    socket.on("tts_audio_end", () => {
+      console.log("🔊 TTS stream ended. Playing audio.");
+      ttsAudio.style.display = 'block';
+
+      if (ttsAudioChunks.length === 0) {
+        console.warn("No audio chunks received to play.");
+        return;
+      }
+
+      // Merge Uint8Array chunks
+      const totalLen = ttsAudioChunks.reduce((sum, c) => sum + c.length, 0);
+      const combined = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of ttsAudioChunks) {
+        combined.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      // Create blob & play (MPEG is the format from edge-tts)
+      const blob = new Blob([combined.buffer], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      ttsAudio.src = url;
+      ttsAudio.load();
+      ttsAudio.play().catch(e => console.warn("Playback prevented by browser (autoplay rules):", e));
+      ttsAudioChunks = []; // reset
+    });
+
+    // --- Recording Logic ---
+    async function startRecording() {
+      if (recording) return;
+
+      const lang = document.getElementById("lang").value;
+      const gender = document.getElementById("gender").value;
+      const output = document.getElementById("output").value;
+      
+      // 1. Send Configuration
+      socket.emit("set_options", { lang, gender, output });
+
+      console.log("🎤 Requesting microphone access with 16kHz sample rate...");
+      try {
+        // 2. Request mic access, trying to force 16kHz directly
+        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                // IMPORTANT: Requesting 16kHz directly to match the model
+                sampleRate: TARGET_SAMPLE_RATE,
+                channelCount: 1,
+                echoCancellation: true
+            }
+        });
+        console.log("✅ Microphone access granted.");
+      } catch (err) {
+        alert("Microphone access denied: " + err.message);
+        return;
+      }
+      
+      // 3. Setup Audio Context (ensure it matches the requested rate)
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: TARGET_SAMPLE_RATE });
+      
+      if (audioContext.sampleRate !== TARGET_SAMPLE_RATE) {
+          console.warn(`Browser did not honor 16kHz request. Context rate: ${audioContext.sampleRate}Hz.`);
+          // If the browser doesn't honor 16kHz, the backend will still receive non-16kHz data,
+          // which is why the energy might be zeroed out in the decoding step.
+          // In a production app, we would use a library like 'resampler.js' here.
+          // For now, we rely on the backend's float/int conversion being robust.
+      }
+
+      sourceNode = audioContext.createMediaStreamSource(mediaStream);
+      processor = audioContext.createScriptProcessor(CHUNK_SIZE, 1, 1);
+      
+      sourceNode.connect(processor);
+      processor.connect(audioContext.destination);
+
+      processor.onaudioprocess = event => {
+        if (!recording) return;
+        
+        // Get raw Float32 data
+        const input = event.inputBuffer.getChannelData(0);
+        
+        // Convert to 16-bit PCM (signed integers)
+        const buffer = new ArrayBuffer(input.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < input.length; i++) {
+          // Normalize and scale from [-1, 1] to [-32768, 32767]
+          let s = Math.max(-1, Math.min(1, input[i]));
+          // Use little-endian (true)
+          view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); 
+        }
+        
+        // Send the ArrayBuffer as binary data
+        socket.emit("audio_chunk", buffer); // Removed the unnecessary { binary: true } which can cause issues
+      };
+
+      recording = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      transcriptionEl.textContent = "Listening... Speak now.";
+      statusEl.textContent = "🎧 Recording...";
+      ttsAudio.style.display = 'none'; // Hide audio player while recording
+    }
+
+    function stopRecording() {
+      if (!recording) return;
+      recording = false;
+      
+      // 1. Send signal to the backend to process the final buffer
+      socket.emit("stop_recording"); 
+
+      // 2. Disconnect and clean up
+      if (processor) processor.disconnect();
+      if (sourceNode) sourceNode.disconnect();
+      if (audioContext) audioContext.close().catch(e => console.error("AudioContext close error:", e));
+      if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+      
+      // 3. Update UI
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = "⏹️ Recording stopped";
+    }
+
+    // --- Initialization ---
+    startBtn.disabled = true; // Disable until connected
+    startBtn.onclick = startRecording;
+    stopBtn.onclick = stopRecording;
+  </script>
+</body>
+</html>

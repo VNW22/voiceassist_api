@@ -22,7 +22,7 @@ This API uses finetuned Hugging Face Whisper models:
 ## WebSocket Endpoint
 
 ```
-wss://<your-modal-endpoint>
+"wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws"
 ```
 
 The API communicates over WebSocket for real-time streaming of audio chunks.
