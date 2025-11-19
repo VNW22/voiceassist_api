@@ -1,165 +1,163 @@
 
----
+# 🎙️ Voiceassist-API
 
-# Voicessist API
+![Status](https://img.shields.io/badge/status-active-brightgreen)
+![GPU](https://img.shields.io/badge/GPU-NVIDIA%20L4-blue)
+![Modal](https://img.shields.io/badge/Platform-Modal-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-![Modal Hosted](https://img.shields.io/badge/Hosted%20on-Modal-blueviolet)
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![ASR](https://img.shields.io/badge/Speech--to--Text-Whisper%20Finetuned-success)
-![Languages](https://img.shields.io/badge/Languages-Kenyan%20English%20%26%20Swahili-yellow)
-![HuggingFace](https://img.shields.io/badge/Models-HuggingFace-orange)
-![WebSocket](https://img.shields.io/badge/API-WebSocket%20Streaming-informational)
-![Purpose](https://img.shields.io/badge/Purpose-Speech%20Impaired%20Accessibility-%23FF69B4)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen)
-![License](https://img.shields.io/github/license/VNW22/voicessist-api)
-![Stars](https://img.shields.io/github/stars/VNW22/voicessist-api?style=social)
+This repository hosts a high-performance, real-time Speech-to-Text (STT) and Text-to-Speech (TTS) backend powered by **Modal**. It is designed to handle streaming audio input and provide instant transcription and voice responses in **Kenyan English** and **Swahili**.
 
 ---
 
-Voicessist is a real-time Speech-to-Text (STT) and Text-to-Speech (TTS) API designed for **speech-impaired users**.
-It supports **Kenyan English** and **Swahili**, and is optimized for **non-standard speech patterns**.
-The service is fully hosted on **Modal**, providing low-latency, scalable inference.
+## 🏗️ Architecture & Models
+
+### Speech-to-Text (STT)
+
+The system uses fine-tuned variants of OpenAI's Whisper (Medium) architecture, specifically optimized for non-standard dialects:
+
+* **English Model:** `Veronica1NW/en_whisper_nonstandard_medium`
+* **Swahili Model:** `Veronica1NW/sw_whisper_nonstandard_medium`
+
+### Text-to-Speech (TTS)
+
+Audio responses are generated using **Azure Cognitive Services Speech SDK**, utilizing high-quality Neural voices specific to the region.
+
+### Infrastructure
+
+* **Host:** [Modal](https://modal.com)
+* **Hardware:** NVIDIA L4 GPU
+* **Timeout:** Sessions have a **strict 30-minute limit**. After 30 minutes, the WebSocket will disconnect, and the client must initiate a new connection.
 
 ---
 
-                
+## 🗺️ System Architecture Diagram
 
-## 🚀 Features
-
-* Real-time **STT** (speech → text)
-* Real-time **TTS** (text → speech)
-* Supports **Kenyan English + Swahili**
-* Optimized for **non-standard and impaired speech**
-* WebSocket-based streaming
-* Hosted on **Modal** for reliable cloud inference
-
----
-
-## 🧠 Models Used
-
-* **English Whisper (Finetuned):** `Veronica1NW/en_whisper_nonstandard_medium`
-* **Swahili Whisper (Finetuned):** `Veronica1NW/sw_whisper_nonstandard_medium`
-
-Models are automatically downloaded from Hugging Face at runtime.
+```mermaid
+graph TD;
+    A[Client Browser / App] -->|16kHz PCM Audio| B(WebSocket Endpoint);
+    B --> C[Modal GPU Function - STT Processor];
+    C -->|Transcribed Text| D[TTS Generator - Azure Speech];
+    D -->|WAV Audio Bytes| A;
+    C -->|Text Frames| A;
+```
 
 ---
 
-## 🌐 WebSocket Endpoint (Modal Hosted)
+## 🌍 Supported Languages & Voices
 
-Use this WebSocket URL to connect to the API:
+The backend supports dynamic switching between languages and genders during the stream.
+
+| Language             | Code | Gender | Azure Voice ID         |
+| :------------------- | :--- | :----- | :--------------------- |
+| **English (Kenyan)** | `en` | Male   | `en-KE-ChilembaNeural` |
+| **English (Kenyan)** | `en` | Female | `en-KE-AsiliaNeural`   |
+| **Swahili (Kenyan)** | `sw` | Male   | `sw-KE-RafikiNeural`   |
+| **Swahili (Kenyan)** | `sw` | Female | `sw-KE-ZuriNeural`     |
+
+---
+
+## 🔌 Connectivity
+
+### Endpoints
+
+* **Web Endpoint:** `https://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run`
+* **WebSocket URL:** `wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws`
+
+### Authentication
+
+⚠️ **API Key Required**: This backend is protected. You must provide a valid `auth_token` in the initial JSON configuration message immediately upon connecting. Please request an API key from the administrator.
+
+---
+
+## 💻 Client Implementation Guide
+
+### 1. Connection Setup (JavaScript)
 
 ```javascript
 const WS_URL = "wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws";
+const ws = new WebSocket(WS_URL);
+ws.binaryType = 'arraybuffer'; // Essential for receiving audio bytes
 ```
 
-This endpoint handles streaming audio input and returns:
+### 2. Initial Configuration (Handshake)
 
-* live STT transcriptions
-* real-time TTS audio (base64)
+Immediately after the WebSocket opens, you **must** send a JSON string containing your authentication token and initial settings.
+
+```javascript
+ws.onopen = () => {
+    const config = {
+        auth_token: "YOUR_API_KEY_HERE",
+        lang: "en",       // "en" or "sw"
+        mode: "audio+text", // "text" or "audio+text"
+        gender: "female"  // "male" or "female"
+    };
+    ws.send(JSON.stringify(config));
+};
+```
+
+### 3. Audio Input Specifications (Sending Data)
+
+The model expects raw PCM audio data sent as binary messages.
+
+* **Format:** 16-bit PCM (Int16)
+* **Sample Rate:** 16,000 Hz (16kHz)
+* **Channels:** Mono (1 channel)
+* **Chunk Size:** Recommended **4096 bytes** per frame.
+* **Data Type:** ArrayBuffer / Blob.
+
+**Note:** Ensure you downsample microphone input (usually 44.1kHz or 48kHz) to **16kHz** before sending to save bandwidth and match model expectations.
+
+### 4. Handling Responses
+
+The backend sends two types of messages:
+
+1. **Text Data (JSON/String):** Contains the transcription or status updates.
+
+   ```json
+   {
+       "type": "config_updated",
+       "lang": "sw",
+       "mode": "audio+text",
+       "gender": "male"
+   }
+   ```
+
+   Or raw transcription strings:
+
+   ```
+   "Hello, how are you?"
+   ```
+
+2. **Binary Data (ArrayBuffer):** Contains the TTS audio (WAV format) generated by Azure.
 
 ---
 
-## 🎧 Sending Audio Chunks
+## ⚠️ Important UX Note: Handling Audio Playback
 
-To send streaming audio:
+When using **`audio+text` mode**, the backend will send audio bytes back to the client.
 
-* **Encoding:** Base64
-* **Format:** raw audio or PCM WAV
-* **Recommended rate:** 16 kHz
-* **Chunk size:** ~1–3 seconds
+**CRITICAL:** Do **not** automatically play the received audio if the user's microphone is still active/open.
 
-### Audio Chunk Payload
+### 1. The Problem
 
-```json
-{
-  "type": "audio_chunk",
-  "audio": "<base64-encoded-audio>"
-}
-```
+If the AI voice plays while the microphone is listening, the microphone will pick up the AI's voice. The backend will hear itself, transcribe it, and respond to itself, causing a feedback loop.
 
-### Stream Control Messages
+### 2. The Solution
 
-```json
-{"type": "start_stream"}
-{"type": "end_stream"}
-```
+* Disable the microphone when audio is received.
+* Provide a **"Play Response" button**.
+* Or implement echo cancellation.
 
 ---
 
-## 📥 Receiving Responses
+## 🔄 Switching Modes Runtime
 
-### Transcription Response
+You can switch languages or voices mid-stream by sending a new text frame with the JSON config:
 
-```json
-{
-  "type": "transcription",
-  "text": "Hello, how are you?"
-}
+```javascript
+ws.send(JSON.stringify({
+    lang: "sw",
+    gender: "male"
+}));
 ```
-
-### TTS Audio Response
-
-```json
-{
-  "type": "tts",
-  "audio": "<base64-encoded-audio>"
-}
-```
-
----
-
-## 📂 Frontend / Backend Compatibility
-
-All detailed instructions for:
-
-* formatting audio for the backend
-* converting microphone audio to **16 kHz**
-* streaming PCM data
-* implementing STT + TTS with **FastAPI** and **Uvicorn**
-
-are located in the **`main/` folder** of this repository.
-
-> The `main/` folder provides the full working example of how the STT + TTS pipeline is implemented.
-
----
-
-## 🔧 Local Installation
-
-```bash
-git clone https://github.com/VNW22/voicessist-api.git
-cd voicessist-api
-pip install -r requirements.txt
-```
-
----
-
-## 🐍 Python Example Client
-
-```python
-import asyncio
-import websockets
-import base64
-
-async def stream():
-    uri = "wss://veronicahwags-cdli--streaming-whisper-whisperasr-web.modal.run/ws"
-    async with websockets.connect(uri) as ws:
-
-        await ws.send('{"type": "start_stream"}')
-
-        with open("chunk.wav", "rb") as f:
-            chunk = f.read()
-
-        b64 = base64.b64encode(chunk).decode()
-        await ws.send(f'{{"type":"audio_chunk","audio":"{b64}"}}')
-
-        print(await ws.recv())
-
-        await ws.send('{"type":"end_stream"}')
-
-asyncio.run(stream())
-```
-
----
-
-
-error: Receives operational errors.

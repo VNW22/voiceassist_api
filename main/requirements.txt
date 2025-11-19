@@ -1,11 +1,11 @@
 torch
 transformers
 pydub==0.25.1
-fastapi==0.115.12
+fastapi
 uvicorn
 numpy<2
 librosa
-hf_transfer
-websockets==11.0.3
+websockets
 webrtcvad
 requests
+azure-cognitiveservices-speech
